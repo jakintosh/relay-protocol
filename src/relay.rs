@@ -88,6 +88,13 @@ pub struct RelayNode {
 }
 
 impl RelayNode {
+    pub fn new() -> RelayNode {
+        RelayNode {
+            last_protocol_key: 0,
+            registered_protocols_by_id: HashMap::new(),
+        }
+    }
+
     pub fn register_handler(&mut self, id: ProtocolId, handler: Box<dyn ProtocolHandler + Sync>) {
         // Remove registered handler, if it exists
         let (key, peer_keys) = match self.registered_protocols_by_id.remove(&id) {
