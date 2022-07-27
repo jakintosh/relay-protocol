@@ -6,6 +6,7 @@ use bytes::Bytes;
 use std::net::SocketAddr;
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Clone, Debug)]
 pub enum TransportProtocol {
@@ -31,7 +32,7 @@ pub struct TransportMessage {
 }
 
 pub type TransportTx = UnboundedSender<TransportMessage>;
-pub type TransportRx = UnboundedReceiver<TransportMessage>;
+pub type TransportRx = UnboundedReceiverStream<TransportMessage>;
 
 struct RawTransportMessage {
     addr: SocketAddr,

@@ -115,11 +115,11 @@ impl RelayNode {
     pub async fn listen(&mut self) {
         let port = 27850;
         let buffer_size = 512;
-        let mut router = Router::new(port, buffer_size);
+        let (router, mut message_stream) = Router::new(port, buffer_size);
 
-        while let Some(message) = router.next().await {
+        while let Some(message) = message_stream.next().await {
             let TransportMessage { addr, bytes } = message;
-            println!("addr{{{:?}}} Received {} bytes", addr, bytes.len());
+            println!("RELAY: {:?} Received {} bytes", addr, bytes.len());
             if let Some((addr, message)) = self.handle_external_message(addr, bytes.into()) {
                 router.send(TransportMessage {
                     addr,
