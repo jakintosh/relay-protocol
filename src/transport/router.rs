@@ -2,7 +2,7 @@ use super::{
     tcp, udp, PeerAddress, RawTransportMessage, RawTransportRx, RawTransportTx, TransportMessage,
     TransportProtocol, TransportRx, TransportTx,
 };
-use futures_core::Stream;
+use futures::Stream;
 use tokio::sync::mpsc::unbounded_channel;
 
 pub(crate) struct Router {
@@ -60,6 +60,7 @@ impl Router {
                 addr,
                 protocol: TransportProtocol::Stream,
             };
+            println!("router tcp recv addr: {{{:?}}}", addr);
             if let Err(_) = transport_tx.send(TransportMessage { addr, bytes }) {
                 // can't send any more transport messages
             }
@@ -73,6 +74,7 @@ impl Router {
                 addr,
                 protocol: TransportProtocol::Datagram,
             };
+            println!("router udp recv addr: {{{:?}}}", addr);
             if let Err(_) = transport_tx.send(TransportMessage { addr, bytes }) {
                 // can't send any more transport messages
             }

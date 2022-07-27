@@ -1,6 +1,6 @@
 use crate::transport::{router::Router, PeerAddress, TransportMessage};
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures::StreamExt;
 use std::collections::HashMap;
 
 type MessageId = u8;
@@ -119,6 +119,7 @@ impl RelayNode {
 
         while let Some(message) = router.next().await {
             let TransportMessage { addr, bytes } = message;
+            println!("addr{{{:?}}} Received {} bytes", addr, bytes.len());
             if let Some((addr, message)) = self.handle_external_message(addr, bytes.into()) {
                 router.send(TransportMessage {
                     addr,

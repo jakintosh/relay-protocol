@@ -7,13 +7,13 @@ use std::net::SocketAddr;
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TransportProtocol {
     Datagram,
     Stream,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PeerAddress {
     Unix {
         addr: UnixSocketAddr,

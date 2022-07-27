@@ -1,114 +1,157 @@
-pub(crate) mod connection_table;
+use super::{RawTransportMessage, RawTransportRx, RawTransportTx};
 
-use super::{RawTransportRx, RawTransportTx};
-use futures_util::StreamExt;
-use std::net::SocketAddr;
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
+use std::{collections::HashMap, net::SocketAddr};
 use tokio::{
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener,
-    },
-    sync::{mpsc, oneshot},
+    net::TcpListener,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-// type aliases
-type NetworkFrameRead = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
-type NetworkFrameWrite = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
-
-pub(super) async fn listen(port: u16, bytes_tx: RawTransportTx, bytes_rx: RawTransportRx) {
-    let (conn_msg_tx, conn_msg_rx) = mpsc::unbounded_channel();
+pub(super) async fn listen(
+    port: u16,
+    transport_msg_tx: RawTransportTx,
+    transport_msg_rx: RawTransportRx,
+) {
+    let (t, r) = mpsc::unbounded_channel();
 
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(address).await.expect("couldn't bind tcp");
     println!(
-        "ip{{{}}}->tcp{{{}}} LISTENING",
+        "ip{{{}}}->tcp{{{}}} Listening",
         address.ip(),
         address.port()
     );
 
     // kick off processes
     tokio::select! {
-        _ = connection_table::listen(conn_msg_rx) => {}
-        _ = accept_connections(listener, bytes_tx, conn_msg_tx.clone()) => {}
-        _ = read_messages(bytes_rx, conn_msg_tx) => {},
+        _ = accept_connections(listener, transport_msg_tx, t.clone()) => {}
+        _ = handle_connection_events(r) => {},
+        _ = relay_outgoing_bytes(transport_msg_rx, t) => {},
     };
 }
 
+enum ConnectionEvent {
+    New {
+        addr: SocketAddr,
+        channel: UnboundedSender<Bytes>,
+    },
+    Send {
+        addr: SocketAddr,
+        bytes: Bytes,
+    },
+}
+type ConnEventTx = UnboundedSender<ConnectionEvent>;
+type ConnEventRx = UnboundedReceiver<ConnectionEvent>;
+
 async fn accept_connections(
     listener: TcpListener,
-    bytes_tx: RawTransportTx,
-    conn_table_tx: connection_table::MessageTx,
+    inbound_tx: RawTransportTx,
+    conn_event_tx: ConnEventTx,
 ) {
     loop {
+        let conn_event_tx = conn_event_tx.clone();
         match listener.accept().await {
-            Ok((stream, addr)) => {
-                println!("accepted connection from {}", addr);
+            Ok((tcp, addr)) => {
+                let inbound_tx = inbound_tx.clone();
+                tokio::spawn(async move {
+                    let (mut sink, mut stream) =
+                        Framed::new(tcp, LengthDelimitedCodec::new()).split();
 
-                // split and frame the tcp stream
-                let (read, write) = stream.into_split();
-                let stream = NetworkFrameRead::new(read, LengthDelimitedCodec::new());
-                let sink = NetworkFrameWrite::new(write, LengthDelimitedCodec::new());
+                    // relay all inbound data from tcp stream
+                    tokio::spawn(async move {
+                        while let Some(frame) = stream.next().await {
+                            match frame {
+                                Ok(bytes) => {
+                                    println!(
+                                        "ip{{{}}}->tcp{{{}}} Received {} bytes",
+                                        addr.ip(),
+                                        addr.port(),
+                                        bytes.len()
+                                    );
+                                    let msg = RawTransportMessage {
+                                        addr,
+                                        bytes: bytes.freeze(),
+                                    };
+                                    if let Err(_) = inbound_tx.send(msg) {}
+                                }
+                                Err(err) => {
+                                    println!(
+                                        "ip{{{}}}->tcp{{{}}} Receive Error: {}",
+                                        addr.ip(),
+                                        addr.port(),
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                    });
 
-                // insert sink into connection table
-                let (id_tx, id_rx) = oneshot::channel(); // create a oneshot value return channel
-                let insert_message = connection_table::Message::Insert { sink, id_tx };
-                if let Err(_) = conn_table_tx.send(insert_message) {
-                    println!("connection table is closed, cannot accept any more connections");
-                    return;
-                }
+                    // hand off all outbound data to tcp stream
+                    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<Bytes>();
+                    tokio::spawn(async move {
+                        while let Some(bytes) = outbound_rx.recv().await {
+                            let count = bytes.len();
+                            match sink.send(bytes).await {
+                                Ok(()) => {
+                                    println!(
+                                        "ip{{{}}}->tcp{{{}}} Sent {} bytes",
+                                        addr.ip(),
+                                        addr.port(),
+                                        count
+                                    );
+                                }
+                                Err(err) => {
+                                    println!(
+                                        "ip{{{}}}->tcp{{{}}} Send Error: {} ",
+                                        addr.ip(),
+                                        addr.port(),
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                    });
 
-                // wait for sink_id from sink table
-                match id_rx.await {
-                    Ok(sink_id) => {
-                        let message_out = bytes_tx.clone();
-                        tokio::spawn(poll_connection(
-                            stream,
-                            sink_id,
-                            conn_table_tx.clone(),
-                            message_out,
-                        ));
+                    // fire event for new connection
+                    let new_conn_event = ConnectionEvent::New {
+                        addr,
+                        channel: outbound_tx,
+                    };
+                    if let Err(_) = conn_event_tx.send(new_conn_event) {
+                        println!("couldn't register tcp connection");
                     }
-                    Err(_) => {
-                        println!(
-                            "couldn't store connection sink for {}: dropping connection",
-                            addr
-                        );
-                        continue;
-                    }
-                };
+                });
             }
             Err(e) => println!("couldn't accept client: {:?}", e),
         }
     }
 }
 
-async fn poll_connection(
-    mut stream: NetworkFrameRead,
-    sink_id: usize,
-    conn_table_tx: connection_table::MessageTx,
-    bytes_tx: RawTransportTx,
-) {
-    while let Some(frame) = stream.next().await {
-        // decode the tcp frame
-        let bytes = match frame {
-            Ok(b) => b,
-            Err(e) => {
-                println!("tcp frame decode failure: {:?}", e);
-                continue;
+async fn handle_connection_events(mut connection_event_rx: ConnEventRx) {
+    let mut map = HashMap::new();
+    while let Some(event) = connection_event_rx.recv().await {
+        match event {
+            ConnectionEvent::New { addr, channel } => {
+                map.insert(addr, channel);
             }
-        };
-
-        // send the bytes elsewhere
+            ConnectionEvent::Send { addr, bytes } => match map.get(&addr) {
+                Some(channel) => if let Err(_) = channel.send(bytes) {},
+                None => todo!(),
+            },
+        }
     }
-
-    // connection is closed, drop the sink
-    let _unused_result = conn_table_tx.send(connection_table::Message::Remove(sink_id));
 }
 
-async fn read_messages(
-    mut message_rx: RawTransportRx,
-    sink_message_tx: connection_table::MessageTx,
+async fn relay_outgoing_bytes(
+    mut transport_msg_rx: RawTransportRx,
+    connection_event_tx: ConnEventTx,
 ) {
-    while let Some(message) = message_rx.recv().await {}
+    while let Some(message) = transport_msg_rx.recv().await {
+        let RawTransportMessage { addr, bytes } = message;
+        if let Err(_) = connection_event_tx.send(ConnectionEvent::Send { addr, bytes }) {
+            println!("couldn't relay outgoing bytes for {}", addr);
+        };
+    }
 }
