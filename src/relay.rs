@@ -1,6 +1,7 @@
 use crate::transport::{router::Router, PeerAddress, TransportMessage};
 use bytes::Bytes;
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type MessageId = u8;
@@ -10,6 +11,7 @@ type ProtocolKey = u8;
 type Payload = Vec<u8>;
 type PayloadMask = u8;
 
+#[derive(Serialize, Deserialize)]
 pub enum ExternalMessage {
     NegotiableMessage {
         message_id: MessageId,
@@ -41,14 +43,24 @@ pub enum ExternalMessage {
         payload: Payload,
     },
 }
-impl From<Bytes> for ExternalMessage {
-    fn from(_: Bytes) -> Self {
-        todo!()
+impl TryFrom<Bytes> for ExternalMessage {
+    type Error = String;
+
+    fn try_from(bytes: Bytes) -> Result<Self, Self::Error> {
+        match rmp_serde::from_slice(bytes.as_ref()) {
+            Ok(msg) => Ok(msg),
+            Err(err) => Err(format!("failed to deserialize bytes: {}", err)),
+        }
     }
 }
-impl From<ExternalMessage> for Bytes {
-    fn from(_: ExternalMessage) -> Self {
-        todo!()
+impl TryFrom<ExternalMessage> for Bytes {
+    type Error = String;
+
+    fn try_from(message: ExternalMessage) -> Result<Self, Self::Error> {
+        match rmp_serde::to_vec(&message) {
+            Ok(bytes) => Ok(bytes.into()),
+            Err(err) => Err(format!("failed to serialize message: {}", err)),
+        }
     }
 }
 
@@ -120,11 +132,19 @@ impl RelayNode {
         while let Some(message) = message_stream.next().await {
             let TransportMessage { addr, bytes } = message;
             println!("RELAY: {:?} Received {} bytes", addr, bytes.len());
-            if let Some((addr, message)) = self.handle_external_message(addr, bytes.into()) {
-                router.send(TransportMessage {
-                    addr,
-                    bytes: message.into(),
-                });
+            let external_message = match bytes.try_into() {
+                Ok(msg) => msg,
+                Err(err) => {
+                    println!("couldn't deserialize external message: {}", err);
+                    continue;
+                }
+            };
+            if let Some((addr, message)) = self.handle_external_message(addr, external_message) {
+                let bytes = match message.try_into() {
+                    Ok(b) => b,
+                    Err(_) => todo!(),
+                };
+                router.send(TransportMessage { addr, bytes });
             }
         }
     }
