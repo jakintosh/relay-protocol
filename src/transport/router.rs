@@ -1,34 +1,46 @@
 use super::{
-    tcp, udp, PeerAddress, RawTransportMessage, RawTransportRx, RawTransportTx, TransportMessage,
-    TransportProtocol, TransportRx, TransportTx,
+    tcp, udp, FrameRx, FrameTx, PeerAddress, TransportFrame, TransportMessage, TransportProtocol,
+    TransportRx, TransportTx,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
 pub(crate) struct Router {
-    tcp_send_tx: RawTransportTx,
-    udp_send_tx: RawTransportTx,
+    tcp_out_frame_tx: FrameTx,
+    udp_out_frame_tx: FrameTx,
 }
 impl Router {
     pub fn new(port: u16, buffer_size: usize) -> (Router, TransportRx) {
-        let (transport_tx, transport_rx) = unbounded_channel();
+        let (tcp_transport_tx, transport_rx) = unbounded_channel();
+        let udp_transport_tx = tcp_transport_tx.clone();
 
-        let (tcp_recv_tx, tcp_recv_rx) = unbounded_channel();
-        let (tcp_send_tx, tcp_send_rx) = unbounded_channel();
-        tokio::spawn(tcp::listen(port, tcp_recv_tx, tcp_send_rx));
-        tokio::spawn(Router::handle_tcp_recv(tcp_recv_rx, transport_tx.clone()));
+        let (tcp_in_frame_tx, tcp_in_frame_rx) = unbounded_channel();
+        let (tcp_out_frame_tx, tcp_out_frame_rx) = unbounded_channel();
+        tokio::spawn(tcp::listen(port, tcp_in_frame_tx, tcp_out_frame_rx));
+        tokio::spawn(Router::handle_tcp_incoming(
+            tcp_in_frame_rx,
+            tcp_transport_tx,
+        ));
 
-        let (udp_recv_tx, udp_recv_rx) = unbounded_channel();
-        let (udp_send_tx, udp_send_rx) = unbounded_channel();
-        tokio::spawn(udp::listen(port, buffer_size, udp_recv_tx, udp_send_rx));
-        tokio::spawn(Router::handle_udp_recv(udp_recv_rx, transport_tx.clone()));
+        let (udp_in_frame_tx, udp_in_frame_rx) = unbounded_channel();
+        let (udp_out_frame_tx, udp_out_frame_rx) = unbounded_channel();
+        tokio::spawn(udp::listen(
+            port,
+            buffer_size,
+            udp_in_frame_tx,
+            udp_out_frame_rx,
+        ));
+        tokio::spawn(Router::handle_udp_incoming(
+            udp_in_frame_rx,
+            udp_transport_tx,
+        ));
 
-        (
-            Router {
-                tcp_send_tx,
-                udp_send_tx,
-            },
-            transport_rx.into(),
-        )
+        let router = Router {
+            tcp_out_frame_tx,
+            udp_out_frame_tx,
+        };
+        let transport_msg_stream = transport_rx.into();
+
+        (router, transport_msg_stream)
     }
 
     pub fn send(&self, message: TransportMessage) {
@@ -40,12 +52,12 @@ impl Router {
             },
             PeerAddress::Internet { addr, protocol } => match protocol {
                 TransportProtocol::Datagram => {
-                    if let Err(_) = self.udp_send_tx.send(RawTransportMessage { addr, bytes }) {
+                    if let Err(_) = self.udp_out_frame_tx.send(TransportFrame { addr, bytes }) {
                         // can't send
                     }
                 }
                 TransportProtocol::Stream => {
-                    if let Err(_) = self.tcp_send_tx.send(RawTransportMessage { addr, bytes }) {
+                    if let Err(_) = self.tcp_out_frame_tx.send(TransportFrame { addr, bytes }) {
                         // can't send
                     }
                 }
@@ -53,9 +65,9 @@ impl Router {
         }
     }
 
-    async fn handle_tcp_recv(mut tcp_recv_rx: RawTransportRx, transport_tx: TransportTx) {
-        while let Some(msg_in) = tcp_recv_rx.recv().await {
-            let RawTransportMessage { addr, bytes } = msg_in;
+    async fn handle_tcp_incoming(mut tcp_recv_rx: FrameRx, transport_tx: TransportTx) {
+        while let Some(tcp_message) = tcp_recv_rx.recv().await {
+            let TransportFrame { addr, bytes } = tcp_message;
             let addr = PeerAddress::Internet {
                 addr,
                 protocol: TransportProtocol::Stream,
@@ -67,9 +79,9 @@ impl Router {
         }
     }
 
-    async fn handle_udp_recv(mut udp_recv_rx: RawTransportRx, transport_tx: TransportTx) {
-        while let Some(msg_in) = udp_recv_rx.recv().await {
-            let RawTransportMessage { addr, bytes } = msg_in;
+    async fn handle_udp_incoming(mut udp_recv_rx: FrameRx, transport_tx: TransportTx) {
+        while let Some(udp_message) = udp_recv_rx.recv().await {
+            let TransportFrame { addr, bytes } = udp_message;
             let addr = PeerAddress::Internet {
                 addr,
                 protocol: TransportProtocol::Datagram,
