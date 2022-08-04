@@ -27,13 +27,13 @@ pub enum PeerAddress {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TransportMessage {
+pub struct Message {
     pub addr: PeerAddress,
-    pub bytes: Bytes,
+    pub payload: Bytes,
 }
 
-pub(crate) type TransportTx = UnboundedSender<TransportMessage>;
-pub(crate) type TransportRx = UnboundedReceiverStream<TransportMessage>;
+pub(crate) type TransportTx = UnboundedSender<Message>;
+pub(crate) type TransportRx = UnboundedReceiverStream<Message>;
 
 struct TransportFrame {
     addr: SocketAddr,

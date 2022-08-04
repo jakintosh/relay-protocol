@@ -1,5 +1,5 @@
 use super::{
-    tcp, udp, FrameRx, FrameTx, PeerAddress, TransportFrame, TransportMessage, TransportProtocol,
+    tcp, udp, FrameRx, FrameTx, Message, PeerAddress, TransportFrame, TransportProtocol,
     TransportRx, TransportTx,
 };
 use tokio::sync::mpsc::unbounded_channel;
@@ -43,9 +43,12 @@ impl Router {
         (router, transport_msg_stream)
     }
 
-    pub fn send(&self, message: TransportMessage) {
-        let TransportMessage { addr, bytes } = message;
-        match addr {
+    pub fn send(&self, message: Message) {
+        let Message {
+            addr: address,
+            payload: bytes,
+        } = message;
+        match address {
             PeerAddress::Unix { addr: _, protocol } => match protocol {
                 TransportProtocol::Datagram => panic!("unix sockets not supported yet"),
                 TransportProtocol::Stream => panic!("unix sockets not supported yet"),
@@ -67,13 +70,15 @@ impl Router {
 
     async fn handle_tcp_incoming(mut tcp_recv_rx: FrameRx, transport_tx: TransportTx) {
         while let Some(tcp_message) = tcp_recv_rx.recv().await {
-            let TransportFrame { addr, bytes } = tcp_message;
+            let TransportFrame {
+                addr,
+                bytes: payload,
+            } = tcp_message;
             let addr = PeerAddress::Internet {
                 addr,
                 protocol: TransportProtocol::Stream,
             };
-
-            if let Err(_) = transport_tx.send(TransportMessage { addr, bytes }) {
+            if let Err(_) = transport_tx.send(Message { addr, payload }) {
                 // can't send any more transport messages
             }
         }
@@ -81,12 +86,15 @@ impl Router {
 
     async fn handle_udp_incoming(mut udp_recv_rx: FrameRx, transport_tx: TransportTx) {
         while let Some(udp_message) = udp_recv_rx.recv().await {
-            let TransportFrame { addr, bytes } = udp_message;
+            let TransportFrame {
+                addr,
+                bytes: payload,
+            } = udp_message;
             let addr = PeerAddress::Internet {
                 addr,
                 protocol: TransportProtocol::Datagram,
             };
-            if let Err(_) = transport_tx.send(TransportMessage { addr, bytes }) {
+            if let Err(_) = transport_tx.send(Message { addr, payload }) {
                 // can't send any more transport messages
             }
         }
