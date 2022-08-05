@@ -17,18 +17,18 @@ pub enum TransportProtocol {
 #[derive(Clone, Debug)]
 pub enum PeerAddress {
     Unix {
-        addr: UnixSocketAddr,
+        address: UnixSocketAddr,
         protocol: TransportProtocol,
     },
     Internet {
-        addr: SocketAddr,
+        address: SocketAddr,
         protocol: TransportProtocol,
     },
 }
 
 #[derive(Clone, Debug)]
 pub struct Message {
-    pub addr: PeerAddress,
+    pub address: PeerAddress,
     pub payload: Bytes,
 }
 
@@ -36,7 +36,7 @@ pub(crate) type TransportTx = UnboundedSender<Message>;
 pub(crate) type TransportRx = UnboundedReceiverStream<Message>;
 
 struct TransportFrame {
-    addr: SocketAddr,
+    address: SocketAddr,
     bytes: Bytes,
 }
 

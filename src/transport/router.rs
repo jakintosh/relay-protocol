@@ -45,22 +45,31 @@ impl Router {
 
     pub fn send(&self, message: Message) {
         let Message {
-            addr: address,
+            address,
             payload: bytes,
         } = message;
         match address {
-            PeerAddress::Unix { addr: _, protocol } => match protocol {
+            PeerAddress::Unix {
+                address: _,
+                protocol,
+            } => match protocol {
                 TransportProtocol::Datagram => panic!("unix sockets not supported yet"),
                 TransportProtocol::Stream => panic!("unix sockets not supported yet"),
             },
-            PeerAddress::Internet { addr, protocol } => match protocol {
+            PeerAddress::Internet { address, protocol } => match protocol {
                 TransportProtocol::Datagram => {
-                    if let Err(_) = self.udp_out_frame_tx.send(TransportFrame { addr, bytes }) {
+                    if let Err(_) = self
+                        .udp_out_frame_tx
+                        .send(TransportFrame { address, bytes })
+                    {
                         // can't send
                     }
                 }
                 TransportProtocol::Stream => {
-                    if let Err(_) = self.tcp_out_frame_tx.send(TransportFrame { addr, bytes }) {
+                    if let Err(_) = self
+                        .tcp_out_frame_tx
+                        .send(TransportFrame { address, bytes })
+                    {
                         // can't send
                     }
                 }
@@ -71,14 +80,14 @@ impl Router {
     async fn handle_tcp_incoming(mut tcp_recv_rx: FrameRx, transport_tx: TransportTx) {
         while let Some(tcp_message) = tcp_recv_rx.recv().await {
             let TransportFrame {
-                addr,
+                address,
                 bytes: payload,
             } = tcp_message;
-            let addr = PeerAddress::Internet {
-                addr,
+            let address = PeerAddress::Internet {
+                address,
                 protocol: TransportProtocol::Stream,
             };
-            if let Err(_) = transport_tx.send(Message { addr, payload }) {
+            if let Err(_) = transport_tx.send(Message { address, payload }) {
                 // can't send any more transport messages
             }
         }
@@ -87,14 +96,14 @@ impl Router {
     async fn handle_udp_incoming(mut udp_recv_rx: FrameRx, transport_tx: TransportTx) {
         while let Some(udp_message) = udp_recv_rx.recv().await {
             let TransportFrame {
-                addr,
+                address,
                 bytes: payload,
             } = udp_message;
-            let addr = PeerAddress::Internet {
-                addr,
+            let address = PeerAddress::Internet {
+                address,
                 protocol: TransportProtocol::Datagram,
             };
-            if let Err(_) = transport_tx.send(Message { addr, payload }) {
+            if let Err(_) = transport_tx.send(Message { address, payload }) {
                 // can't send any more transport messages
             }
         }

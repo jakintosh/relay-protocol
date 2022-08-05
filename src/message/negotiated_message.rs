@@ -27,10 +27,10 @@ pub fn handle(
 
         // we support the protocol and the payload, relay it and handle the response
         let bytes = payload;
-        let message = ProtocolMessage::MessageReceived { address, bytes };
-        let response = node.relay_message(protocol, message);
-        let external_message = handle_response(response);
-        return external_message;
+        let protocol_message = ProtocolMessage::MessageReceived { address, bytes };
+        let response = node.relay_message(protocol, protocol_message);
+        let relay_message = handle_response(response);
+        return relay_message;
     }
 
     // none of the proposals are supported, negotation failed

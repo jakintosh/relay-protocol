@@ -1,5 +1,5 @@
 use super::{MessageId, ProtocolId};
-use crate::{Node, NodeMessage, NodeResponse, PeerAddress};
+use crate::{Message, Node, NodeMessage, NodeResponse, PeerAddress};
 
 /*
     If we are receiving this message, we need to make sure that we recently
@@ -21,16 +21,22 @@ use crate::{Node, NodeMessage, NodeResponse, PeerAddress};
             a) how do we manage this in the first place? should the
                implementer keep track? should this library keep track?
 */
-pub fn handle(node: &Node, address: PeerAddress, message_id: MessageId, proposal: ProtocolId) {
+pub fn handle(
+    node: &Node,
+    address: PeerAddress,
+    message_id: MessageId,
+    proposal: ProtocolId,
+) -> Option<Message> {
     let response = node.notify_delegate(NodeMessage::ProtocolNegotiated {
         address,
         message_id,
         proposal,
     });
-    handle_response(response);
+
+    handle_response(response)
 }
 
-fn handle_response(response: NodeResponse) -> Option<NodeMessage> {
+fn handle_response(response: NodeResponse) -> Option<Message> {
     match response {
         _ => None,
     }

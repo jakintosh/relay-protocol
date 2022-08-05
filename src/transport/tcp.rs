@@ -12,8 +12,14 @@ use tokio::{
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 enum ConnectionMessage {
-    New { addr: SocketAddr, bytes_tx: BytesTx },
-    Send { addr: SocketAddr, bytes: Bytes },
+    New {
+        address: SocketAddr,
+        bytes_tx: BytesTx,
+    },
+    Send {
+        address: SocketAddr,
+        bytes: Bytes,
+    },
 }
 
 type ConnMsgTx = UnboundedSender<ConnectionMessage>;
@@ -41,15 +47,15 @@ pub(super) async fn listen(port: u16, in_frame_tx: FrameTx, out_frame_rx: FrameR
 async fn accept_connections(listener: TcpListener, in_frame_tx: FrameTx, conn_msg_tx: ConnMsgTx) {
     loop {
         match listener.accept().await {
-            Ok((tcp, addr)) => {
+            Ok((tcp, address)) => {
                 let in_frame_tx = in_frame_tx.clone();
 
                 let (sink, stream) = Framed::new(tcp, LengthDelimitedCodec::new()).split();
                 let (bytes_tx, bytes_rx) = mpsc::unbounded_channel::<Bytes>();
-                tokio::spawn(handle_tcp_stream(stream, addr, in_frame_tx));
-                tokio::spawn(handle_tcp_sink(sink, addr, bytes_rx));
+                tokio::spawn(handle_tcp_stream(stream, address, in_frame_tx));
+                tokio::spawn(handle_tcp_sink(sink, address, bytes_rx));
 
-                if let Err(_) = conn_msg_tx.send(ConnectionMessage::New { addr, bytes_tx }) {
+                if let Err(_) = conn_msg_tx.send(ConnectionMessage::New { address, bytes_tx }) {
                     println!("Error: Couldn't register new tcp connection");
                     println!("       Connection message receiver is closed");
                 }
@@ -59,32 +65,32 @@ async fn accept_connections(listener: TcpListener, in_frame_tx: FrameTx, conn_ms
     }
 }
 
-async fn handle_tcp_stream(mut stream: SplitTcpStream, addr: SocketAddr, in_frame_tx: FrameTx) {
+async fn handle_tcp_stream(mut stream: SplitTcpStream, address: SocketAddr, in_frame_tx: FrameTx) {
     while let Some(frame) = stream.next().await {
         match frame {
             Ok(bytes) => {
                 let len = bytes.len();
                 let bytes = bytes.freeze();
-                let msg = TransportFrame { addr, bytes };
+                let msg = TransportFrame { address, bytes };
                 match in_frame_tx.send(msg) {
-                    Ok(()) => println!("{} Received {} bytes", addr_str(addr), len),
+                    Ok(()) => println!("{} Received {} bytes", addr_str(address), len),
                     Err(_) => {
-                        println!("{} Error: Frame receiver is closed", addr_str(addr));
+                        println!("{} Error: Frame receiver is closed", addr_str(address));
                         return;
                     }
                 }
             }
-            Err(err) => println!("{} Receive Error: {}", addr_str(addr), err),
+            Err(err) => println!("{} Receive Error: {}", addr_str(address), err),
         }
     }
 }
 
-async fn handle_tcp_sink(mut sink: SplitTcpSink, addr: SocketAddr, mut bytes_rx: BytesRx) {
+async fn handle_tcp_sink(mut sink: SplitTcpSink, address: SocketAddr, mut bytes_rx: BytesRx) {
     while let Some(bytes) = bytes_rx.recv().await {
         let count = bytes.len();
         match sink.send(bytes).await {
-            Ok(()) => println!("{} Sent {} bytes", addr_str(addr), count),
-            Err(err) => println!("{} Send Error: {} ", addr_str(addr), err),
+            Ok(()) => println!("{} Sent {} bytes", addr_str(address), count),
+            Err(err) => println!("{} Send Error: {} ", addr_str(address), err),
         }
     }
 }
@@ -93,18 +99,18 @@ async fn process_connection_messages(mut conn_msg_rx: ConnMessageRx) {
     let mut map = HashMap::new();
     while let Some(message) = conn_msg_rx.recv().await {
         match message {
-            ConnectionMessage::New { addr, bytes_tx } => {
-                map.insert(addr, bytes_tx);
+            ConnectionMessage::New { address, bytes_tx } => {
+                map.insert(address, bytes_tx);
             }
-            ConnectionMessage::Send { addr, bytes } => match map.get(&addr) {
+            ConnectionMessage::Send { address, bytes } => match map.get(&address) {
                 Some(bytes_tx) => match bytes_tx.send(bytes) {
                     Ok(()) => {}
                     Err(_) => {
-                        println!("{} Error: Byte receiver is closed", addr_str(addr));
-                        map.remove(&addr);
+                        println!("{} Error: Byte receiver is closed", addr_str(address));
+                        map.remove(&address);
                     }
                 },
-                None => println!("{} Error: No registered byte receiver", addr_str(addr)),
+                None => println!("{} Error: No registered byte receiver", addr_str(address)),
             },
         }
     }
@@ -112,14 +118,14 @@ async fn process_connection_messages(mut conn_msg_rx: ConnMessageRx) {
 
 async fn relay_outgoing_bytes(mut out_frame_tx: FrameRx, conn_msg_tx: ConnMsgTx) {
     while let Some(message) = out_frame_tx.recv().await {
-        let TransportFrame { addr, bytes } = message;
-        if let Err(_) = conn_msg_tx.send(ConnectionMessage::Send { addr, bytes }) {
+        let TransportFrame { address, bytes } = message;
+        if let Err(_) = conn_msg_tx.send(ConnectionMessage::Send { address, bytes }) {
             println!("Error: Connection message receiver is closed");
             return;
         };
     }
 }
 
-fn addr_str(addr: SocketAddr) -> String {
-    format!("ip{{{}}}->tcp{{{}}}", addr.ip(), addr.port(),)
+fn addr_str(address: SocketAddr) -> String {
+    format!("ip{{{}}}->tcp{{{}}}", address.ip(), address.port(),)
 }
