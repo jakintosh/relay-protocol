@@ -15,7 +15,7 @@ pub fn handle(
     page_count: PageCount,
 ) -> Option<Message> {
     // delegate the message
-    let delegate = node.clone_delegate();
+    let delegate = node.borrow_delegate();
     delegate.handle_negotiation_failure(address, message_id, page_count);
 
     None

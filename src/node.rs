@@ -4,7 +4,6 @@ use crate::transport::{router::Router, Message as TransportMessage, TransportRx}
 use crate::{PeerAddress, ProtocolHandler};
 use futures::StreamExt;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub trait Delegate {
     fn handle_negotiated_protocol(
@@ -25,13 +24,13 @@ pub struct Node {
     router: Router,
     message_stream: TransportRx,
     last_key: u8,
-    delegate: Arc<dyn Delegate>,
+    delegate: Box<dyn Delegate>,
     protocols_by_id: HashMap<ProtocolId, Protocol>,
     ids_by_key: HashMap<ProtocolKey, ProtocolId>,
 }
 
 impl Node {
-    pub fn new(delegate: Arc<dyn Delegate>) -> Node {
+    pub fn new(delegate: Box<dyn Delegate>) -> Node {
         let port = 27850;
         let buffer_size = 512;
         let (router, message_stream) = Router::new(port, buffer_size);
@@ -101,8 +100,8 @@ impl Node {
         }
     }
 
-    pub(crate) fn clone_delegate(&self) -> Arc<dyn Delegate> {
-        self.delegate.clone()
+    pub(crate) fn borrow_delegate(&self) -> &Box<dyn Delegate> {
+        &self.delegate
     }
 
     pub(crate) fn get_protocol_id(&self, key: ProtocolKey) -> Option<&ProtocolId> {
