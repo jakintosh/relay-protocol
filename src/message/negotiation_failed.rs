@@ -1,5 +1,5 @@
 use super::{MessageId, PageCount};
-use crate::{Message, Node, NodeMessage, NodeResponse, PeerAddress};
+use crate::{Message, Node, PeerAddress};
 
 pub fn handle(
     node: &Node,
@@ -7,17 +7,8 @@ pub fn handle(
     message_id: MessageId,
     page_count: PageCount,
 ) -> Option<Message> {
-    let response = node.notify_delegate(NodeMessage::ProtocolNegotiationFailed {
-        address,
-        message_id,
-        page_count,
-    });
+    node.get_delegate()
+        .handle_negotiation_failure(address, message_id, page_count);
 
-    handle_response(response)
-}
-
-fn handle_response(response: NodeResponse) -> Option<Message> {
-    match response {
-        _ => None,
-    }
+    None
 }

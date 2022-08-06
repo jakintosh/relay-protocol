@@ -1,5 +1,5 @@
 use super::{MessageId, ProtocolId};
-use crate::{Message, Node, NodeMessage, NodeResponse, PeerAddress};
+use crate::{Message, Node, PeerAddress};
 
 /*
     If we are receiving this message, we need to make sure that we recently
@@ -27,17 +27,8 @@ pub fn handle(
     message_id: MessageId,
     proposal: ProtocolId,
 ) -> Option<Message> {
-    let response = node.notify_delegate(NodeMessage::ProtocolNegotiated {
-        address,
-        message_id,
-        proposal,
-    });
+    let delegate = node.get_delegate();
+    delegate.handle_negotiated_protocol(address, message_id, proposal);
 
-    handle_response(response)
-}
-
-fn handle_response(response: NodeResponse) -> Option<Message> {
-    match response {
-        _ => None,
-    }
+    None
 }

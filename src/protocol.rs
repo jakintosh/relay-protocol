@@ -1,30 +1,11 @@
 use crate::message::ProtocolKey;
-use crate::transport::{Message as TransportMessage, PeerAddress};
+use crate::transport::PeerAddress;
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub enum Message {
-    MessageReceived {
-        address: PeerAddress,
-        bytes: Vec<u8>,
-    },
-    ConnectionAccepted {
-        address: PeerAddress,
-        bytes: Vec<u8>,
-    },
-}
-
-#[derive(Debug)]
-pub enum Response {
-    MessageAcknowledged,
-    RelayMessages(Vec<TransportMessage>),
-    ConnectionAccepted(Vec<TransportMessage>),
-    ConnectionClosed(Vec<TransportMessage>),
-    UnregisteredProtocolId,
-}
-
 pub trait Handler {
-    fn receive_message(&self, message: Message) -> Response;
+    fn handle_message(&self, address: PeerAddress, payload: Vec<u8>);
+    fn handle_accepted_connection(&self, address: PeerAddress, payload: Vec<u8>) -> bool;
+    fn handle_closed_connection(&self, address: PeerAddress, payload: Vec<u8>);
 }
 
 pub(crate) struct Protocol {

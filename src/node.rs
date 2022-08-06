@@ -1,46 +1,37 @@
-use crate::message::{
-    self, Message as RelayMessage, MessageId, PageCount, ProtocolId, ProtocolKey,
-};
+use crate::message::{self, Message, MessageId, PageCount, ProtocolId, ProtocolKey};
 use crate::protocol::Protocol;
 use crate::transport::{router::Router, Message as TransportMessage, TransportRx};
-use crate::{PeerAddress, ProtocolHandler, ProtocolMessage, ProtocolResponse};
+use crate::{PeerAddress, ProtocolHandler};
 use futures::StreamExt;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-#[derive(Debug)]
-pub enum Message {
-    ProtocolNegotiated {
+pub trait Delegate {
+    fn handle_negotiated_protocol(
+        &self,
         address: PeerAddress,
         message_id: MessageId,
-        proposal: ProtocolId,
-    },
-    ProtocolNegotiationFailed {
+        protocol_id: ProtocolId,
+    );
+    fn handle_negotiation_failure(
+        &self,
         address: PeerAddress,
         message_id: MessageId,
         page_count: PageCount,
-    },
-}
-
-#[derive(Debug)]
-pub enum Response {
-    None,
-}
-
-pub trait Delegate {
-    fn receive_message(&self, message: Message) -> Response;
+    );
 }
 
 pub struct Node {
     router: Router,
     message_stream: TransportRx,
     last_key: u8,
-    delegate: Box<dyn Delegate>,
-    protocols_by_id: HashMap<ProtocolId, Protocol>,
+    delegate: Arc<dyn Delegate>,
+    protocols_by_id: HashMap<ProtocolId, Arc<Mutex<Protocol>>>,
     ids_by_key: HashMap<ProtocolKey, ProtocolId>,
 }
 
 impl Node {
-    pub fn new(delegate: Box<dyn Delegate>) -> Node {
+    pub fn new(delegate: Arc<dyn Delegate>) -> Node {
         let port = 27850;
         let buffer_size = 512;
         let (router, message_stream) = Router::new(port, buffer_size);
@@ -60,19 +51,20 @@ impl Node {
         //   if it existed, extract and reuse existing key/peer_keys
         //   if not, create new key/peer_keys
         let (key, peer_keys) = match self.protocols_by_id.remove(&id) {
-            Some(Protocol { key, peer_keys, .. }) => (key, peer_keys),
+            Some(protocol) => {
+                let protocol = protocol.lock().unwrap();
+                (protocol.key, protocol.peer_keys.clone())
+            }
             None => (self.get_next_key(), HashMap::new()),
         };
 
         // construct a new protocol and insert it into the table
-        self.protocols_by_id.insert(
-            id,
-            Protocol {
-                handler,
-                key,
-                peer_keys,
-            },
-        );
+        let protocol = Arc::new(Mutex::new(Protocol {
+            handler,
+            key,
+            peer_keys,
+        }));
+        self.protocols_by_id.insert(id, protocol);
     }
 
     pub async fn listen(&mut self) {
@@ -91,7 +83,7 @@ impl Node {
         }
     }
 
-    pub async fn send(&mut self, address: PeerAddress, message: RelayMessage) {
+    pub fn send(&mut self, address: PeerAddress, message: Message) {
         let payload = match message.try_into() {
             Ok(bytes) => bytes,
             Err(_) => todo!(),
@@ -99,23 +91,33 @@ impl Node {
         self.router.send(TransportMessage { address, payload });
     }
 
-    pub fn has_registered_protocol(&self, id: &ProtocolId) -> bool {
-        self.protocols_by_id.contains_key(id)
-    }
-
-    pub(crate) fn relay_message(
-        &self,
-        id: &ProtocolId,
-        message: ProtocolMessage,
-    ) -> ProtocolResponse {
-        match self.get_protocol(id) {
-            Some(protocol) => protocol.handler.receive_message(message),
-            None => ProtocolResponse::UnregisteredProtocolId,
+    pub(crate) fn get_protocol(&self, id: &ProtocolId) -> Option<Arc<Mutex<Protocol>>> {
+        match self.protocols_by_id.get(id) {
+            Some(protocol) => Some(protocol.clone()),
+            None => None,
         }
     }
 
-    pub(crate) fn notify_delegate(&self, message: Message) -> Response {
-        self.delegate.receive_message(message)
+    pub(crate) fn get_delegate(&self) -> Arc<dyn Delegate> {
+        self.delegate.clone()
+    }
+
+    pub(crate) fn register_peer_key(
+        &mut self,
+        address: PeerAddress,
+        id: &ProtocolId,
+        key: ProtocolKey,
+    ) -> bool {
+        match self.protocols_by_id.get_mut(id) {
+            Some(protocol) => {
+                {
+                    let mut protocol = protocol.lock().unwrap();
+                    protocol.peer_keys.insert(address, key);
+                }
+                true
+            }
+            None => false,
+        }
     }
 
     pub(crate) fn get_protocol_id(&self, key: ProtocolKey) -> Option<&ProtocolId> {
@@ -125,9 +127,5 @@ impl Node {
     fn get_next_key(&mut self) -> ProtocolKey {
         self.last_key += 1;
         return self.last_key;
-    }
-
-    fn get_protocol(&self, id: &ProtocolId) -> Option<&Protocol> {
-        self.protocols_by_id.get(id)
     }
 }

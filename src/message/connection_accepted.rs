@@ -1,5 +1,5 @@
 use crate::message::{Payload, ProtocolId, ProtocolKey};
-use crate::{Message, Node, PeerAddress, ProtocolMessage, ProtocolResponse};
+use crate::{Message, Node, PeerAddress};
 
 /*
 
@@ -13,25 +13,42 @@ use crate::{Message, Node, PeerAddress, ProtocolMessage, ProtocolResponse};
 
 */
 pub fn handle(
-    node: &Node,
+    node: &mut Node,
     address: PeerAddress,
-    protocol: ProtocolId,
-    key: ProtocolKey,
+    id: ProtocolId,
+    peer_key: ProtocolKey,
     payload: Payload,
 ) -> Option<Message> {
-    let response = node.relay_message(
-        &protocol,
-        ProtocolMessage::ConnectionAccepted {
-            address,
-            bytes: payload,
+    let (conn_confirmed, my_key) = match node.get_protocol(&id) {
+        None => return None, // invalid protocol id
+        Some(p) => {
+            let p = p.lock().unwrap();
+            let key = p.key;
+            let confirmed = !p
+                .handler
+                .handle_accepted_connection(address.clone(), payload);
+
+            (confirmed, key)
+        }
+    };
+
+    if !conn_confirmed {
+        // connection denied
+    }
+
+    if !node.register_peer_key(address.clone(), &id, peer_key) {
+        // failed to register peer key
+    }
+
+    // everything worked out, return our key
+    node.send(
+        address,
+        Message::ConnectionConfirmed {
+            protocol: id,
+            key: my_key,
+            payload: Vec::new(),
         },
     );
 
-    handle_response(response)
-}
-
-fn handle_response(response: ProtocolResponse) -> Option<Message> {
-    match response {
-        _ => None,
-    }
+    None
 }

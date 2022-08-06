@@ -6,17 +6,17 @@ pub mod connection_accepted;
 pub mod connection_closed;
 pub mod connection_confirmed;
 pub mod connection_message;
-pub mod negotiated_message;
+pub mod negotiable_message;
 pub mod negotiated_protocol_choice;
 pub mod negotiation_failed;
 
 // define types
-pub(crate) type MessageId = u8;
-pub(crate) type PageCount = u8;
-pub(crate) type ProtocolId = Vec<u8>;
-pub(crate) type ProtocolKey = u8;
-pub(crate) type Payload = Vec<u8>;
-pub(crate) type PayloadMask = u8;
+pub type MessageId = u8;
+pub type PageCount = u8;
+pub type ProtocolId = Vec<u8>;
+pub type ProtocolKey = u8;
+pub type Payload = Vec<u8>;
+pub type PayloadMask = u8;
 
 // relay protocol messages
 #[derive(Serialize, Deserialize)]
@@ -76,15 +76,16 @@ impl TryFrom<Message> for Bytes {
     }
 }
 
-pub fn handle(node: &Node, address: PeerAddress, message: Message) {
-    match message {
+pub fn handle(node: &mut Node, address: PeerAddress, message: Message) {
+    let return_address = address.clone();
+    let response = match message {
         Message::NegotiableMessage {
             message_id,
             page_count,
             proposals,
             payload_mask,
             payload,
-        } => negotiated_message::handle(
+        } => negotiable_message::handle(
             node,
             address,
             message_id,
@@ -118,6 +119,8 @@ pub fn handle(node: &Node, address: PeerAddress, message: Message) {
             connection_message::handle(node, address, key, payload)
         }
     };
-}
 
-fn handle_response(response: Message) {}
+    if let Some(message) = response {
+        node.send(return_address, message);
+    }
+}
