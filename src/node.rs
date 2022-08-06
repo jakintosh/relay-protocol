@@ -94,24 +94,15 @@ impl Node {
             None => None,
         }
     }
+    pub(crate) fn get_protocol_mut(&mut self, id: &ProtocolId) -> Option<&mut Protocol> {
+        match self.protocols_by_id.get_mut(id) {
+            Some(protocol) => Some(protocol),
+            None => None,
+        }
+    }
 
     pub(crate) fn clone_delegate(&self) -> Arc<dyn Delegate> {
         self.delegate.clone()
-    }
-
-    pub(crate) fn register_peer_key(
-        &mut self,
-        address: PeerAddress,
-        id: &ProtocolId,
-        key: ProtocolKey,
-    ) -> bool {
-        match self.protocols_by_id.get_mut(id) {
-            Some(protocol) => {
-                protocol.peer_keys.insert(address, key);
-                true
-            }
-            None => false,
-        }
     }
 
     pub(crate) fn get_protocol_id(&self, key: ProtocolKey) -> Option<&ProtocolId> {

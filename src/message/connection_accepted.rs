@@ -15,39 +15,39 @@ use crate::{Message, Node, PeerAddress};
 pub fn handle(
     node: &mut Node,
     address: PeerAddress,
-    id: ProtocolId,
+    protocol_id: ProtocolId,
     peer_key: ProtocolKey,
     payload: Payload,
 ) -> Option<Message> {
-    let (conn_confirmed, my_key) = match node.get_protocol(&id) {
+    // verify the payload with the protocol (also get its key)
+    let (verification_payload, my_key) = match node.get_protocol(&protocol_id) {
         None => return None, // invalid protocol id
         Some(p) => {
             let key = p.key;
-            let confirmed = !p
+            let verification_payload = p
                 .handler
-                .handle_accepted_connection(address.clone(), payload);
+                .verify_accepted_connection(address.clone(), payload);
 
-            (confirmed, key)
+            (verification_payload, key)
         }
     };
 
-    if !conn_confirmed {
-        // connection denied
-    }
+    // if verification was successful, it should be "Some"
+    let payload = match verification_payload {
+        Some(payload) => payload,
+        None => return None, // connection denied
+    };
 
-    if !node.register_peer_key(address.clone(), &id, peer_key) {
-        // failed to register peer key
-    }
+    // insert peer key into protocol's peer_keys table
+    match node.get_protocol_mut(&protocol_id) {
+        None => return None, // invalid protocol id
+        Some(p) => p.peer_keys.insert(address, peer_key),
+    };
 
     // everything worked out, return our key
-    node.send(
-        address,
-        Message::ConnectionConfirmed {
-            protocol: id,
-            key: my_key,
-            payload: Vec::new(),
-        },
-    );
-
-    None
+    Some(Message::ConnectionConfirmed {
+        protocol: protocol_id,
+        key: my_key,
+        payload,
+    })
 }

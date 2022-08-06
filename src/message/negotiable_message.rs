@@ -10,7 +10,9 @@ pub fn handle(
     payload_mask: PayloadMask,
     payload: Payload,
 ) -> Option<Message> {
+    // iterate through all the proposals
     for (index, id) in proposals.iter().enumerate() {
+        // check to see if we have this protocol
         let protocol = match node.get_protocol(id) {
             None => continue, // we don't support this protocol, skip it
             Some(p) => p,
@@ -25,9 +27,8 @@ pub fn handle(
             });
         }
 
-        // we support the protocol and the payload, relay it and handle the respons
+        // we support the protocol and the payload: relay it
         protocol.handler.handle_message(address, payload);
-
         return None;
     }
 
