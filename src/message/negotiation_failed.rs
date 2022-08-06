@@ -7,8 +7,8 @@ pub fn handle(
     message_id: MessageId,
     page_count: PageCount,
 ) -> Option<Message> {
-    node.get_delegate()
-        .handle_negotiation_failure(address, message_id, page_count);
+    let delegate = node.clone_delegate();
+    delegate.handle_negotiation_failure(address, message_id, page_count);
 
     None
 }

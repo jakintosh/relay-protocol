@@ -20,10 +20,7 @@ pub fn handle(
         Some(p) => p,
     };
 
-    {
-        let p = protocol.lock().unwrap();
-        p.handler.handle_message(address, payload);
-    }
+    protocol.handler.handle_message(address, payload);
 
     None
 }

@@ -26,10 +26,7 @@ pub fn handle(
         }
 
         // we support the protocol and the payload, relay it and handle the respons
-        {
-            let p = protocol.lock().unwrap();
-            p.handler.handle_message(address, payload);
-        }
+        protocol.handler.handle_message(address, payload);
 
         return None;
     }

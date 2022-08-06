@@ -22,7 +22,6 @@ pub fn handle(
     let (conn_confirmed, my_key) = match node.get_protocol(&id) {
         None => return None, // invalid protocol id
         Some(p) => {
-            let p = p.lock().unwrap();
             let key = p.key;
             let confirmed = !p
                 .handler

@@ -4,7 +4,7 @@ use crate::transport::{router::Router, Message as TransportMessage, TransportRx}
 use crate::{PeerAddress, ProtocolHandler};
 use futures::StreamExt;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub trait Delegate {
     fn handle_negotiated_protocol(
@@ -26,7 +26,7 @@ pub struct Node {
     message_stream: TransportRx,
     last_key: u8,
     delegate: Arc<dyn Delegate>,
-    protocols_by_id: HashMap<ProtocolId, Arc<Mutex<Protocol>>>,
+    protocols_by_id: HashMap<ProtocolId, Protocol>,
     ids_by_key: HashMap<ProtocolKey, ProtocolId>,
 }
 
@@ -51,19 +51,16 @@ impl Node {
         //   if it existed, extract and reuse existing key/peer_keys
         //   if not, create new key/peer_keys
         let (key, peer_keys) = match self.protocols_by_id.remove(&id) {
-            Some(protocol) => {
-                let protocol = protocol.lock().unwrap();
-                (protocol.key, protocol.peer_keys.clone())
-            }
+            Some(protocol) => (protocol.key, protocol.peer_keys.clone()),
             None => (self.get_next_key(), HashMap::new()),
         };
 
         // construct a new protocol and insert it into the table
-        let protocol = Arc::new(Mutex::new(Protocol {
+        let protocol = Protocol {
             handler,
             key,
             peer_keys,
-        }));
+        };
         self.protocols_by_id.insert(id, protocol);
     }
 
@@ -91,14 +88,14 @@ impl Node {
         self.router.send(TransportMessage { address, payload });
     }
 
-    pub(crate) fn get_protocol(&self, id: &ProtocolId) -> Option<Arc<Mutex<Protocol>>> {
+    pub(crate) fn get_protocol(&self, id: &ProtocolId) -> Option<&Protocol> {
         match self.protocols_by_id.get(id) {
-            Some(protocol) => Some(protocol.clone()),
+            Some(protocol) => Some(protocol),
             None => None,
         }
     }
 
-    pub(crate) fn get_delegate(&self) -> Arc<dyn Delegate> {
+    pub(crate) fn clone_delegate(&self) -> Arc<dyn Delegate> {
         self.delegate.clone()
     }
 
@@ -110,10 +107,7 @@ impl Node {
     ) -> bool {
         match self.protocols_by_id.get_mut(id) {
             Some(protocol) => {
-                {
-                    let mut protocol = protocol.lock().unwrap();
-                    protocol.peer_keys.insert(address, key);
-                }
+                protocol.peer_keys.insert(address, key);
                 true
             }
             None => false,

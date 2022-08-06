@@ -27,7 +27,7 @@ pub fn handle(
     message_id: MessageId,
     proposal: ProtocolId,
 ) -> Option<Message> {
-    let delegate = node.get_delegate();
+    let delegate = node.clone_delegate();
     delegate.handle_negotiated_protocol(address, message_id, proposal);
 
     None
